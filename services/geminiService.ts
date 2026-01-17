@@ -1,6 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { StylePreset } from "../types";
+import { StylePreset, SupportedLanguage } from "../types";
 
 const PROMPT_TEMPLATES: Record<StylePreset, string> = {
   [StylePreset.STUDIO]: "A professional studio macro photograph of {fruit}. ONLY FRUIT. Sharp focus, dramatic side-lighting, dark elegant background, hyper-realistic textures, water droplets, cinematic composition. No people, no animals.",
@@ -10,13 +10,19 @@ const PROMPT_TEMPLATES: Record<StylePreset, string> = {
   [StylePreset.MINIMAL]: "A minimalist clean shot of {fruit} on a pure white surface. ONLY FRUIT. Soft neutral shadows, perfect symmetry, sophisticated aesthetic, extremely high detail. No background clutter."
 };
 
+const LANG_NAMES: Record<SupportedLanguage, string> = {
+  es: "Spanish",
+  en: "English",
+  fr: "French",
+  pt: "Portuguese"
+};
+
 export async function getRandomFruitIdea(): Promise<{ fruit: string; details: string; style: StylePreset }> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   const styles = Object.values(StylePreset);
   
   const prompt = `Suggest a visually stunning and interesting fruit or combination of fruits for a high-end realistic photography shoot. 
-  STRICT RULE: Only real edible fruits. No fictional plants.
-  Return ONLY a JSON object: {"fruit": "fruit name", "details": "short description"}`;
+  STRICT RULE: Only real edible fruits. No fictional plants. Return ONLY a JSON object: {"fruit": "fruit name", "details": "short description"}`;
 
   try {
     const response = await ai.models.generateContent({
@@ -32,7 +38,7 @@ export async function getRandomFruitIdea(): Promise<{ fruit: string; details: st
     return { ...idea, style: randomStyle };
   } catch (error) {
     console.error("Error fetching fruit idea:", error);
-    return { fruit: "Cerezas", details: "en un fondo oscuro", style: StylePreset.STUDIO };
+    return { fruit: "Fresa", details: "en un fondo elegante", style: StylePreset.STUDIO };
   }
 }
 
@@ -40,59 +46,49 @@ export async function generateFruitImage(fruit: string, style: StylePreset, extr
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
   
   const basePrompt = PROMPT_TEMPLATES[style].replace('{fruit}', fruit);
-  const finalPrompt = `STRICTLY ONLY FRUIT: ${basePrompt} ${extraDetails}. No people, no hands, no faces, no animals. Just the fruit. Realistic 8k photography.`;
+  const finalPrompt = `STRICTLY ONLY FRUIT: ${basePrompt} ${extraDetails}. No people, no hands, no animals. Hyper-realistic 8k food photography.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash-image',
-      contents: {
-        parts: [{ text: finalPrompt }],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: "3:4", 
-        },
-      },
+      contents: { parts: [{ text: finalPrompt }] },
+      config: { imageConfig: { aspectRatio: "3:4" } },
     });
 
-    if (!response.candidates || response.candidates.length === 0) {
-      throw new Error("No candidates returned. Check API quota.");
-    }
+    if (!response.candidates?.[0]) throw new Error("API Limit reached or content filtered.");
 
-    const candidate = response.candidates[0];
-    for (const part of candidate.content.parts) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
     }
     
-    throw new Error("No image data in response.");
+    throw new Error("No image data found in response.");
   } catch (error: any) {
     console.error("Gemini Image Error:", error);
-    if (error.status === 403) {
-      throw new Error("Error 403: Tu clave de API no tiene permisos para generar imágenes. Asegúrate de que el modelo gemini-2.5-flash-image esté habilitado en tu proyecto de Google Cloud/AI Studio.");
+    if (error.status === 403 || error.message?.includes("PERMISSION_DENIED")) {
+      throw new Error("ERROR 403: Tu clave API no tiene permisos para 'gemini-2.5-flash-image'. Habilítalo en Google AI Studio.");
     }
     throw error;
   }
 }
 
-export async function generatePostText(fruit: string, style: StylePreset, extraDetails: string): Promise<string> {
+export async function generatePostText(fruit: string, style: StylePreset, extraDetails: string, lang: SupportedLanguage): Promise<string> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
-  const prompt = `Escribe un post de Facebook irresistible en español para una foto hiperrealista de ${fruit}.
-  - Usa emojis de frutas.
-  - Habla de frescura y sabor.
-  - Incluye hashtags como #FrutaReal #Saludable.
-  - NO menciones que es IA.
-  - Solo el texto del post.`;
+  const prompt = `Write an irresistible Facebook post in ${LANG_NAMES[lang]} for a hyper-realistic fruit image of ${fruit}.
+  - Use fruit emojis.
+  - Focus on freshness and premium quality.
+  - Include 3-5 relevant hashtags.
+  - DO NOT mention AI.
+  - Language: ${LANG_NAMES[lang]}.
+  - ONLY return the caption text.`;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
     });
-    return response.text?.trim() || "¡La frescura de hoy! 🍎";
+    return response.text?.trim() || "Fruit freshness! 🍎";
   } catch (error) {
-    return "¡Increíble captura de frescura! 🍎✨ #FrutaFresca";
+    return "Amazing fresh fruits! 🍎✨ #FreshFruit";
   }
 }
